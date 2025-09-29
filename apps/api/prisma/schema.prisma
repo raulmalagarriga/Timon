@@ -1,0 +1,269 @@
+// prisma/schema.prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/**
+ * Enums
+ */
+enum MsgDirection {
+  in
+  out
+}
+
+enum MsgType {
+  text
+  image
+  document
+  audio
+  template
+}
+
+enum ConvStatus {
+  nuevo
+  pendiente
+  atendiendo
+  pendiente_pago
+  completado
+  cerrado
+  en_espera_cliente
+}
+
+enum EventType {
+  assign
+  unassign
+  status_change
+  note
+  sla_breach
+}
+
+enum AlertType {
+  no_response
+  overdue
+}
+
+enum AlertStatus {
+  open
+  ack
+  closed
+}
+
+/**
+ * Core multi-tenant: 1 admin por tenant, empleados no autenticados
+ */
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  plan      String?
+  createdAt DateTime @default(now())
+
+  admin       User?   @relation(fields: [adminUserId], references: [id])
+  adminUserId String? @unique
+
+  channel           Channel?
+  employees         Employee[]
+  contacts          Contact[]
+  conversations     Conversation[]
+  labels            Label[]
+  slaPolicies       SlaPolicy[]
+  alerts            Alert[]
+  webhookEvents     WebhookEvent[]
+  refreshTokens     RefreshToken[]
+  Message           Message[]
+  ConversationEvent ConversationEvent[]
+}
+
+model User {
+  id           String         @id @default(uuid())
+  email        String         @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime       @default(now())
+  Tenant       Tenant?
+  RefreshToken RefreshToken[]
+}
+
+model Employee {
+  id        String   @id @default(uuid())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId  String
+  code      String?
+  name      String
+  active    Boolean  @default(true)
+  position  Int?
+  phone     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignedConversations Conversation[] @relation("AssigneeEmployee")
+
+  @@unique([tenantId, name])
+  @@index([tenantId, active])
+}
+
+model Channel {
+  id              String         @id @default(uuid())
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId        String         @unique
+  waPhoneNumberId String
+  waBusinessId    String
+  displayName     String?
+  status          String?
+  Conversation    Conversation[]
+}
+
+model Contact {
+  id            String         @id @default(uuid())
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId      String
+  waPhone       String
+  name          String?
+  customFields  Json?
+  lastSeenAt    DateTime?
+  conversations Conversation[]
+
+  @@unique([tenantId, waPhone])
+}
+
+model Conversation {
+  id        String  @id @default(uuid())
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId  String
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  channelId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  contactId String
+
+  status ConvStatus @default(nuevo)
+
+  assignee   Employee? @relation("AssigneeEmployee", fields: [assigneeId], references: [id])
+  assigneeId String?
+
+  priority          Int       @default(0)
+  openedAt          DateTime  @default(now())
+  closedAt          DateTime?
+  lastMsgAt         DateTime  @default(now())
+  lastAgentMsgAt    DateTime?
+  lastCustomerMsgAt DateTime?
+
+  messages Message[]
+  events   ConversationEvent[]
+  labels   ConversationLabel[]
+  alerts   Alert[]
+
+  @@index([tenantId, status, assigneeId])
+  @@index([lastMsgAt])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId       String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  direction      MsgDirection
+  waMessageId    String?
+  type           MsgType
+  content        Json
+  adminUserId    String?
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model ConversationEvent {
+  id             String       @id @default(uuid())
+  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId       String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  adminUserId    String?
+  type           EventType
+  from           Json?
+  to             Json?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model Label {
+  id       String              @id @default(uuid())
+  tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId String
+  name     String
+  color    String?
+  key      String?
+  convs    ConversationLabel[]
+
+  @@unique([tenantId, name])
+}
+
+model ConversationLabel {
+  id             String       @id @default(uuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  label          Label        @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  labelId        String
+
+  @@unique([conversationId, labelId])
+}
+
+model SlaPolicy {
+  id                String  @id @default(uuid())
+  tenant            Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId          String
+  name              String
+  firstResponseSecs Int
+  nextResponseSecs  Int
+  businessHours     Json?
+  active            Boolean @default(true)
+}
+
+model Alert {
+  id             String       @id @default(uuid())
+  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId       String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  type           AlertType
+  status         AlertStatus  @default(open)
+  createdAt      DateTime     @default(now())
+  closedAt       DateTime?
+}
+
+model WebhookEvent {
+  id           String    @id @default(uuid())
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId     String
+  eventType    String
+  waDeliveryId String?
+  payload      Json
+  receivedAt   DateTime  @default(now())
+  processedAt  DateTime?
+  result       String?
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId  String
+  tokenHash String
+  familyId  String
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  ip        String?
+  userAgent String?
+
+  @@index([userId, tenantId])
+}
