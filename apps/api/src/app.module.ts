@@ -4,11 +4,13 @@ import { AppService } from './app.service';
 import { TenantContextMiddleware } from './common/middleware/tenant-context.middleware';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
+import { RedisService } from './redis/redis.service';
+import { EmployeesModule } from './employees/employees.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, EmployeesModule],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, RedisService],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
