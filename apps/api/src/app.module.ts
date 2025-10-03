@@ -6,9 +6,10 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { RedisService } from './redis/redis.service';
 import { EmployeesModule } from './employees/employees.module';
+import { ConversationsModule } from './conversations/conversations.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, EmployeesModule],
+  imports: [PrismaModule, AuthModule, EmployeesModule, ConversationsModule],
   controllers: [AppController],
   providers: [AppService, RedisService],
 })
